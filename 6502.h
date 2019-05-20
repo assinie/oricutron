@@ -77,6 +77,7 @@ struct membreakpoint
   Uint8  flags;
   Uint8  lastval;
   Uint16 addr;
+  Uint8  bank;
 };
 
 struct m6502
@@ -91,6 +92,7 @@ struct m6502
   SDL_bool anybp, anymbp;
   Sint32   breakpoints[16];
   Uint8    breakpoint_flags[16];
+  Uint8    breakpoint_bank[16];
   struct membreakpoint membreakpoints[16];
   void    *userdata;
 

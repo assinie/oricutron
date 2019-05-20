@@ -26,6 +26,15 @@
 #include "system.h"
 #include "6502.h"
 
+// Pour MACH_TELESTRAT et struct machine
+#include "8912.h"
+#include "via.h"
+#include "monitor.h"
+#include "disk.h"
+#include "6551.h"
+#include "gui.h"
+#include "machine.h"
+
 #define ILLEGALS
 
 void dbg_printf( char *fmt, ... );
@@ -310,9 +319,21 @@ SDL_bool m6502_set_icycles( struct m6502 *cpu, SDL_bool dobp, char *bpmsg )
   {
     if( cpu->anybp )
     {
+      struct machine *oric = (struct machine *)cpu->userdata;
+      int currbank = -1;
+      if (oric->type == MACH_TELESTRAT)
+      {
+        currbank = oric->tele_currbank;
+      }
+      else
+      {
+        // A modifier pour pouvoir placer des BP en RAM overlay
+        currbank = -1;
+      }
+
       for( i=0; i<16; i++ )
       {
-        if( ( cpu->breakpoints[i] != -1 ) && ( cpu->calcpc == cpu->breakpoints[i] ) )
+        if( ( cpu->breakpoints[i] != -1 ) && ( ( cpu->calcpc == cpu->breakpoints[i] ) && ( ( cpu->breakpoint_bank[i] == currbank ) || (currbank == -1 ) ) ) )
         {
           if( (cpu->breakpoint_flags[i] & MBPF_RESETCYCLES) ==  MBPF_RESETCYCLES ) cpu->cycles = 0;
           if( (cpu->breakpoint_flags[i] & MBPF_RESETCYCLESCONTINUE) !=  MBPF_RESETCYCLESCONTINUE ) return SDL_TRUE;

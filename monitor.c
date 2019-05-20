@@ -84,7 +84,7 @@ static unsigned short disaddrs[10];
 static char ibuf[128], lastcmd;
 static char history[10][128];
 static int ilen, iloff=0, cursx, histu=0, histp=-1;
-static unsigned short mon_addr, mon_asmmode = SDL_FALSE;
+static unsigned short mon_bank, mon_addr, mon_asmmode = SDL_FALSE;
 static SDL_bool kshifted = SDL_FALSE, updatepreview = SDL_FALSE;
 static int helpcount=0;
 
@@ -649,18 +649,22 @@ int hexit( char c )
 
 static int bp_at( struct machine *oric, unsigned short addr, int *xbp, int *mbp )
 {
-  int bpmask = 0, i;
+  int bpmask = 0, i, currbank;
 
   if( xbp ) *xbp = -1;
   if( mbp ) *mbp = -1;
 
   oric->cpu.anybp = SDL_FALSE;
+
+  // A voir pour les Oric/Atmos et la RAM overlay
+  currbank = (oric->type == MACH_TELESTRAT) ? oric->tele_currbank : -1;
+
   for( i=0; i<16; i++ )
   {
     if( oric->cpu.breakpoints[i] != -1 )
     {
       oric->cpu.anybp = SDL_TRUE;
-      if( addr == oric->cpu.breakpoints[i] )
+      if( ( addr == oric->cpu.breakpoints[i] ) && ( ( oric->cpu.breakpoint_bank[i] == currbank ) || (currbank == -1) ) )
       {
         bpmask |= 8;
         if( xbp ) *xbp = i;
@@ -1274,7 +1278,7 @@ void mon_update_regs( struct machine *oric )
   tzprintfpos( tz[TZ_REGS], 30, 4, "NMI=%04X RST=%04X",
     (oric->cpu.read( &oric->cpu, 0xfffb )<<8)|oric->cpu.read( &oric->cpu, 0xfffa ),
     (oric->cpu.read( &oric->cpu, 0xfffd )<<8)|oric->cpu.read( &oric->cpu, 0xfffc ) );
-  tzprintfpos( tz[TZ_REGS], 30, 5, "IRQ=%04X", (oric->cpu.read( &oric->cpu, 0xffff )<<8)|oric->cpu.read( &oric->cpu, 0xfffe ) );
+  tzprintfpos( tz[TZ_REGS], 30, 5, "IRQ=%04X BNK=  %02X", (oric->cpu.read( &oric->cpu, 0xffff )<<8)|oric->cpu.read( &oric->cpu, 0xfffe ), (oric->type == MACH_TELESTRAT ? oric->tele_currbank : 0)  );
 
 
   addr = pc;
@@ -1337,7 +1341,8 @@ static void mon_click_regs( struct machine *oric, SDL_bool *needrender, int x, i
       mon_do_cmd( cmdtmp, oric, needrender );
       *needrender = SDL_TRUE;
     } else {
-      sprintf( cmdtmp, "bs $%04x", disaddrs[y-7] );
+      // A voir pour les Oric-1/Atmos et la RAM overlay
+      sprintf( cmdtmp, "bs $%02X%04x", ( ( oric->type == MACH_TELESTRAT ) ? oric->tele_currbank : 0 ), disaddrs[y-7] );
       mon_do_cmd( cmdtmp, oric, needrender );
       *needrender = SDL_TRUE;
     }
@@ -2002,6 +2007,8 @@ void mon_init( struct machine *oric )
   mon_asmmode = SDL_FALSE;
   mon_start_input();
   mon_show_curs();
+  // TODO: A voir pour les Oric-1/Atmos et la RAM overlay
+  mon_bank = ( oric->type == MACH_TELESTRAT ) ? oric->tele_currbank : 0;
   mon_addr = oric->cpu.pc;
   lastcmd = 0;
   mw_split = SDL_FALSE;
@@ -2230,6 +2237,7 @@ SDL_bool mon_getnum( struct machine *oric, unsigned int *num, char *buf, int *of
     if( isws( c ) || ( c == 13 ) || ( c == 10 ) || ( c == 0 ) || ( c == ',' ) || ( c == ')' ) )
     {
       buf[i+j] = 0;
+      // TODO: Ajouter changement temporaire de banque pour la recherche si mon_bank != oric->tele_currbank
       fsym = mon_find_sym_by_name( oric, &buf[i] );
       buf[i+j] = c;
       if( fsym )
@@ -2550,6 +2558,18 @@ SDL_bool mon_new_symbols( struct symboltable *stab, struct machine *oric, char *
   return SDL_TRUE;
 }
 
+void mon_switchbank( struct machine *oric, int new_bank )
+{
+  if ( oric->tele_currbank != new_bank )
+  {
+    oric->tele_currbank = new_bank;
+    oric->tele_banktype = oric->tele_bank[oric->tele_currbank].type;
+    oric->rom           = oric->tele_bank[oric->tele_currbank].ptr;
+
+    // mon_printf("/Bank %02X/", new_bank);
+  }
+}
+
 SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
 {
   int i, j, k, l;
@@ -2729,8 +2749,9 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
             {
               if( oric->cpu.membreakpoints[j].flags )
               {
-                mon_printf( "%02d: $%04X %c%c%c",
+                mon_printf( "%02d: $%02X:%04X %c%c%c",
                   j,
+                  oric->cpu.membreakpoints[j].bank,
                   oric->cpu.membreakpoints[j].addr,
                   (oric->cpu.membreakpoints[j].flags&MBPF_READ) ? 'r' : ' ',
                   (oric->cpu.membreakpoints[j].flags&MBPF_WRITE) ? 'w' : ' ',
@@ -2746,8 +2767,9 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
           {
             if( oric->cpu.breakpoints[j] != -1 )
             {
-              mon_printf( "%02d: $%04X %s%s",
+              mon_printf( "%02d: $%02X:%04X %s%s",
                 j, 
+                oric->cpu.breakpoint_bank[j],
                 oric->cpu.breakpoints[j],
                 (oric->cpu.breakpoint_flags[j]&MBPF_RESETCYCLES) ? "z" : "",
                 (oric->cpu.breakpoint_flags[j]&MBPF_RESETCYCLESCONTINUE) ? "c" : "");
@@ -2778,6 +2800,7 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
               break;
             }
 
+            // TODO: HCL - A modifier pour gestion des banques
             oric->cpu.membreakpoints[j].addr = v & 0xffff;
             oric->cpu.membreakpoints[j].lastval = mon_read( oric, v&0xffff );
             oric->cpu.membreakpoints[j].flags = 0;
@@ -2810,7 +2833,9 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
               oric->cpu.membreakpoints[j].flags = MBPF_READ|MBPF_WRITE;
             oric->cpu.anymbp = SDL_TRUE;
 
-            mon_printf( "m%02d: $%04X %s%s%s", j, oric->cpu.membreakpoints[j].addr,
+            mon_printf( "m%02d: $%02X:%04X %s%s%s", j,
+              oric->cpu.membreakpoints[j].bank,
+              oric->cpu.membreakpoints[j].addr,
               (oric->cpu.membreakpoints[j].flags&MBPF_READ) ? "r" : "",
               (oric->cpu.membreakpoints[j].flags&MBPF_WRITE) ? "w" : "",
               (oric->cpu.membreakpoints[j].flags&MBPF_CHANGE) ? "c" : "" );
@@ -2837,6 +2862,24 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
           }
 
           oric->cpu.breakpoints[j] = v & 0xffff;
+
+          if ( oric->type == MACH_TELESTRAT )
+          {
+            // On considère la banque actuelle par défaut (a voir si la banque par défaut doit être mon_bank ou la banque active)
+	    // ATTENTION: ne permet par de placer un BP dans la banque 0 si ce n'est pas la banque active
+	    // TODO: Forcer bank=0 si l'adresse du BP est inférieure à $C000
+	    if ( ( v & 0x00ffff ) >= 0xc000)
+              oric->cpu.breakpoint_bank[j] = ( (v & 0xff0000) >> 16) == 0 ? oric->tele_currbank : ( v & 0xff0000 ) >> 16;
+	    else
+              oric->cpu.breakpoint_bank[j] = 0;
+
+          }
+          else
+          {
+            // A modifier pour les Oric-1/Atmos et la RAM overlay
+            oric->cpu.breakpoint_bank[j] = 0;
+          }
+
           oric->cpu.breakpoint_flags[j] = 0;
           oric->cpu.anybp = SDL_TRUE;
 
@@ -2858,8 +2901,9 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
             break;
           }
 
-          mon_printf( "%02d: $%04X %s%s", 
+          mon_printf( "%02d: $%02X:%04X %s%s",
             j, 
+            oric->cpu.breakpoint_bank[j],
             oric->cpu.breakpoints[j],
             (oric->cpu.breakpoint_flags[j]&MBPF_RESETCYCLES) ? "z" : "",
             (oric->cpu.breakpoint_flags[j]&MBPF_RESETCYCLESCONTINUE) ? "c" : "" );
@@ -2989,7 +3033,34 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
 
 
           if( mon_getnum( oric, &v, cmd, &i, SDL_TRUE, SDL_FALSE, SDL_FALSE, SDL_TRUE ) )
-            mon_addr = v;
+          {
+            mon_addr = v & 0x00ffff;
+
+            if ( mon_addr >= 0xc000 )
+            {
+              // TODO: Verifier que le n° de banque n'est pas > au max
+              mon_bank = ( v & 0xff0000 ) >> 16;
+
+	      // Force banque actuelle par défaut -> on ne peut faire un dump de la banque 0 si elle n'est pas active
+              if ( mon_bank == 0 )
+                mon_bank = oric->tele_currbank;
+            }
+            else
+              mon_bank = oric->tele_currbank;
+          }
+
+	  // TODO: Prendre en compte un n° de banque
+          // HCL - Modifier temporairement les pointeurs memoire pour pointer vers la banque demandee
+          // TODO: A modifier pour les Oric-1/Atmos et la RAM overlay
+          int currbank = ( oric->type == MACH_TELESTRAT ) ? oric->tele_currbank : -1 ;
+          if ( ( oric->type == MACH_TELESTRAT ) && ( mon_addr >= 0xc000 ) )
+          {
+            if ( oric->tele_currbank != mon_bank )
+            {
+              mon_switchbank( oric, mon_bank);
+              mon_printf("Bank %02X", mon_bank);
+            }
+          }
 
           for( j=0; j<16; j++ )
           {
@@ -3010,6 +3081,11 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
             vsptmp[l++] = '\'';
             vsptmp[l++] = 0;
             mon_str( vsptmp );
+          }
+
+          if ( ( oric->type == MACH_TELESTRAT ) && ( mon_addr >= 0xc000 ) && ( oric->tele_currbank != currbank ) )
+          {
+            mon_switchbank( oric, currbank );
           }
           break;
       }
@@ -3050,6 +3126,8 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
         while( mon_addr <= v )
         {
           SDL_bool looped;
+          // HCL - Modifier termporairement les pointeurs memoire pour pointer vers la banque demandee
+          // (reporter la modif du dump a l'écran (juste en dessous)
           fprintf( f, "%s\n", mon_disassemble( oric, &mon_addr, &looped, SDL_TRUE ) );
           if( looped ) break;
         }
@@ -3061,10 +3139,41 @@ SDL_bool mon_cmd( char *cmd, struct machine *oric, SDL_bool *needrender )
       lastcmd = cmd[i];
       i++;
       if( mon_getnum( oric, &v, cmd, &i, SDL_TRUE, SDL_FALSE, SDL_FALSE, SDL_TRUE ) )
-        mon_addr = v;
+      {
+        mon_addr = v & 0x00ffff;
+
+        if ( mon_addr >= 0xc000 )
+        {
+          // TODO: Verifier que le n° de banque n'est pas > au max
+          mon_bank = ( v & 0xff0000 ) >> 16;
+
+	  // Force banque actuelle par défaut -> on ne peut faire un dump de la banque 0 si elle n'est pas active
+          if ( mon_bank == 0 )
+            mon_bank = oric->tele_currbank;
+        }
+        else
+          mon_bank = oric->tele_currbank;
+      }
+
+      // HCL - Modifier temporairement les pointeurs memoire pour pointer vers la banque demandee
+      // TODO: A modifier pour les Oric-1/Atmos et la RAM overlay
+      int currbank = ( oric->type == MACH_TELESTRAT ) ? oric->tele_currbank : -1 ;
+      if ( ( oric->type == MACH_TELESTRAT ) && ( mon_addr >= 0xc000 ) )
+      {
+        if ( oric->tele_currbank != mon_bank )
+        {
+          mon_switchbank( oric, mon_bank );
+          mon_printf("Bank %02X", mon_bank);
+        }
+      }
 
       for( j=0; j<16; j++ )
         mon_str( mon_disassemble( oric, &mon_addr, NULL, SDL_FALSE ) );
+
+      if ( ( oric->type == MACH_TELESTRAT ) && ( mon_addr >= 0xc000 ) && ( oric->tele_currbank != currbank ) )
+      {
+	mon_switchbank( oric, currbank );
+      }
       break;
 
     case 'r':
