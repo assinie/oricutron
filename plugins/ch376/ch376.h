@@ -104,6 +104,25 @@ typedef struct { void *dummy; } CH376_CONTEXT;
 
 /* /// */
 
+
+struct usb_device_descriptor_t {
+    uint8_t bLength;
+    uint8_t bDescriptorType;
+    uint16_t bcdUSB;
+    uint8_t bDeviceClass;
+    uint8_t bDeviceSubClass;
+    uint8_t bDeviceProtocol;
+    uint8_t bMaxPacketSize0;
+    uint16_t idVendor;
+    uint16_t idProduct;
+    uint16_t bcdDevice;
+    uint8_t iManufacturer;
+    uint8_t iProduct;
+    uint8_t iSerialNumber;
+    uint8_t bNumConfigurations;
+};
+
+
 /* /// "CH376 public I/O API" */
 
 struct ch376;
@@ -120,8 +139,8 @@ const char * ch376_get_sdcard_drive_path(struct ch376 *ch376);
 const char * ch376_get_usb_drive_path(struct ch376 *ch376);
 
 // Runtime
-void ch376_write_command_port(struct ch376 *ch376, CH376_U8 command);
-void ch376_write_data_port(struct ch376 *ch376, CH376_U8 data);
+void ch376_write_command_port(struct ch376 *ch376, CH376_U8 command, struct expansion_bus *oric_bus);
+void ch376_write_data_port(struct ch376 *ch376, CH376_U8 data, struct expansion_bus *oric_bus);
 CH376_U8 ch376_read_command_port(struct ch376 *ch376);
 CH376_U8 ch376_read_data_port(struct ch376 *ch376);
 
